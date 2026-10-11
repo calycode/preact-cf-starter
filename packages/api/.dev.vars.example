@@ -1,0 +1,4 @@
+# Secrets for local `wrangler dev`. Copy to `.dev.vars` and fill in.
+# Never commit real values.
+
+# AUTH_SECRET=change-me

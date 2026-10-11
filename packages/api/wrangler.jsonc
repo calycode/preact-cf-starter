@@ -1,0 +1,17 @@
+{
+   "$schema": "node_modules/wrangler/config-schema.json",
+   "name": "caly-cloud-api",
+   "main": "src/index.ts",
+   "compatibility_date": "2026-10-01",
+   "observability": {
+      "enabled": true,
+   },
+   "vars": {
+      "API_VERSION": "v1",
+   },
+   // Bindings (D1, R2, KV, Queues, Durable Objects, AI) are added only when a
+   // feature requires them — extend ApiEnv at the same time (SPEC D6).
+   //
+   // Production routing (same zone as the webapp, SPEC D4):
+   // "routes": [{ "pattern": "app.example.com/api/*", "zone_name": "example.com" }]
+}
