@@ -1,6 +1,7 @@
 # Caly Cloud Starter — Technical Specification
 
-> **Status:** revised after a pre-build critique of the original draft.
+> **Status:** revised after a pre-build critique of the original draft and
+> updated to include the optional Frostbase backend preset.
 > **Supersedes:** the first `SPEC.md` draft. See §2 for the decisions that
 > changed and why.
 
@@ -16,7 +17,10 @@ It combines:
 - **React-to-Preact aliasing**, enabling shadcn and React-oriented libraries
 - **shadcn/ui** components (Base UI primitives) generated into a reusable
   shared UI package
-- A separate **Hono API Worker** for backend endpoints and Cloudflare bindings
+- A separate **Hono API Worker** for backend endpoints, domain logic, and
+  authorization
+- An **optional Frostbase backend preset** providing auth, document/SQL data,
+  realtime subscriptions, R2-backed storage, and remote configuration
 - **Agentation** for visual UI annotations fed to coding agents through MCP
 - **Turborepo** with remote caching (credentials supplied on demand)
 - A package architecture adapted from `calycode/ai-workspace`
@@ -24,9 +28,24 @@ It combines:
 The starter should be small enough to understand quickly, but structured enough
 to grow into production internal tools and product experiments.
 
-### 1.1 Reference project (corrected)
+### 1.1 Backend philosophy
 
-The original draft claimed to be "inspired by `calycode/ai-workspace`". The real
+The starter does **not** reinvent common backend infrastructure.
+
+- **Hono** remains the application API boundary.
+- **Frostbase** is an optional provider of reusable backend primitives:
+  authentication, document and SQL data, realtime updates, object storage, and
+  remote configuration.
+- Application code depends on repository interfaces, not directly on Frostbase.
+- The base starter remains usable without Frostbase.
+
+This keeps the template lightweight while allowing a project to “build on the
+shoulders of giants” when it needs auth, persistence, uploads, realtime, or
+feature flags.
+
+### 1.2 Reference project (corrected)
+
+The original draft claimed to be “inspired by `calycode/ai-workspace`”. The real
 repository at `calycode/ai-workspace` is **`preact-electron`**: an
 **Electron + Preact** monorepo using **plain pnpm workspaces** — it has **no
 Turborepo, no Hono, no wrangler, no Cloudflare, and no `@caly/*` scope** (its
@@ -35,8 +54,8 @@ packages are bare: `webapp`, `shared`, `ipc-kit`, `worker-kit`).
 We still use it as the reference, but only for the parts it actually proves:
 
 - **Preact + shadcn + Base UI + Tailwind v4 wiring**, documented in
-  `docs/preact-shadcn-baseui-tailwind-guide.md`. This guide is the source of
-  truth for §7 and §8 — the original draft's naive aliasing was wrong.
+  `docs/preact-shadcn-baseui-tailwind.md`. This guide is the source of truth for
+  §7 and §9 — the original draft’s naive aliasing was wrong.
 - The **toolkit-package pattern** (`shared` contracts, `worker-kit` helpers).
 - Prettier / Knip / Husky / pnpm conventions.
 
@@ -51,11 +70,11 @@ for the initial build; revisit only with a new decision record.
 
 The empty target directory means nothing has been built here yet. This document
 is a corrected spec; the first deliverable after it is a **tracer-bullet
-implementation** (§22), not a big-bang scaffold.
+implementation** (§23), not a big-bang scaffold.
 
-### D2 — Adopt the reference's proven Preact/shadcn config verbatim
+### D2 — Adopt the reference’s proven Preact/shadcn config verbatim
 
-Use the reference's battle-tested configuration, not the original draft's
+Use the reference’s battle-tested configuration, not the original draft’s
 guess:
 
 - Vite: **regex `find` aliases**, absolute replacements via
@@ -73,7 +92,7 @@ runtime resolves to the missing `react` package.
 
 ### D3 — Base UI, gated by a compatibility smoke test
 
-Keep shadcn's **Base UI** primitives (Base UI is the shadcn default since July
+Keep shadcn’s **Base UI** primitives (Base UI is the shadcn default since July
 2026; the `base-nova`/`base-mira` styles are real). Base UI and shadcn are
 **React-only and not officially supported under `preact/compat`**; known
 breakage includes `Dialog.Content` hanging under Preact. Therefore:
@@ -91,8 +110,8 @@ The SPA reaches the API through a **separate Cloudflare Worker**:
 - **Dev:** `VITE_API_BASE_URL=http://localhost:8787/api/v1`.
 - **Prod:** `VITE_API_BASE_URL=/api/v1`, served from the same Cloudflare zone,
   with an `/api/*` route bound to the API Worker. This route/zone configuration
-  is part of the spec, not left implied (the original draft would have 404'd
-  because the web Worker's SPA fallback would swallow `/api/*`).
+  is part of the spec, not left implied (the original draft would have 404’d
+  because the web Worker’s SPA fallback would swallow `/api/*`).
 
 ### D5 — Turborepo with remote cache, credentials on demand
 
@@ -113,12 +132,48 @@ committed and CI must not fail when they are absent.
   repo root; a separate package with no consumers is dead weight.
 - **Keep `packages/worker-kit`** only because it has concrete consumers: the
   CORS factory, the error-envelope helpers, and binding-agnostic request
-  middleware used by `packages/api` (§15).
+  middleware used by `packages/api` (§16).
 - **Start the API with zero bindings.** `wrangler.jsonc` has no D1/R2/KV, and
   `ApiEnv` is just `{ API_VERSION: string }`. Add bindings only when a feature
-  needs them (the original draft's required `DB`/`STORAGE`/`CACHE` fields
-  contradicted its own "bindings are optional" claim and break `wrangler dev`
-  with placeholder IDs).
+  needs them.
+
+### D7 — Frostbase is the optional backend preset, not the API framework
+
+Use **Hono** as the stable HTTP API and application boundary. Use **Frostbase**
+as an optional infrastructure layer for auth, data, storage, realtime, and
+remote configuration.
+
+Frostbase does not replace Hono:
+
+- Hono owns `/api/v1/*`, request validation, response envelopes, services, and
+  authorization policies.
+- Frostbase provides reusable backend primitives behind repository adapters.
+- The webapp may call Frostbase directly only for authentication, realtime
+  subscriptions, and storage uploads when explicitly enabled.
+
+Rationale: this preserves the starter’s clean architecture while avoiding
+rebuilding common backend capabilities.
+
+### D8 — Frostbase integration is repository-scoped
+
+Frostbase clients must live in `packages/api/src/infrastructure/frostbase/`.
+Routes and services depend on repository interfaces, not directly on Frostbase
+SDK types.
+
+This keeps the persistence provider replaceable and prevents frontend code from
+coupling to Frostbase.
+
+### D9 — Direct client access is limited and explicit
+
+The Preact app may use Frostbase directly only for:
+
+- Authentication flows.
+- Realtime subscriptions.
+- Storage uploads using signed URLs.
+
+All normal CRUD, sensitive reads, and writes must go through the Hono API.
+
+Rationale: server-side authorization and domain rules remain enforceable.
 
 ## 3. Goals
 
@@ -134,6 +189,9 @@ committed and CI must not fail when they are absent.
 - Enable Agentation-powered visual feedback for AI coding agents.
 - Use Turborepo task graphs and remote caching from the beginning.
 - Maintain typechecking, linting, tests, dependency hygiene, and CI.
+- Build on proven backend primitives rather than reimplementing auth, database,
+  storage, realtime, and feature-flag infrastructure.
+- Keep Frostbase optional: the base starter remains usable without it.
 
 ### Non-goals
 
@@ -142,25 +200,30 @@ committed and CI must not fail when they are absent.
 - Do not use React Router for client-side routing.
 - Do not place product-specific components in the shared UI package.
 - Do not place API implementation code in the webapp.
-- Do not make premature infrastructure decisions around auth, databases, or
-  billing.
+- Do not make premature infrastructure decisions around billing.
+- Do not make Frostbase mandatory; the base template starts with Hono only.
+- Do not expose Frostbase clients directly from route components or feature
+  code.
 
 ## 4. Technology choices
 
-| Area                  | Choice                               | Rationale                                                       |
-| --------------------- | ------------------------------------ | --------------------------------------------------------------- |
-| Monorepo              | Turborepo + pnpm                     | Workspace graph, cached tasks, remote cache (D5)                |
-| Web runtime           | Preact                               | Lightweight React-compatible UI runtime                         |
-| Build tool            | Vite                                 | Fast development and production builds                          |
-| Frontend routing      | `preact-iso`                         | Preact-team router, hooks-based, async-route aware              |
-| Backend framework     | Hono                                 | Lightweight, Web-standard, Worker-native routing and middleware |
-| Hosting               | Cloudflare Workers + static assets   | One platform for frontend and API                               |
-| UI primitives         | shadcn/ui with Base UI (`base-nova`) | Owned, editable components and design tokens (D3)               |
-| Styling               | Tailwind CSS v4 + CSS variables      | CSS-first config, utility-first styling, theme switching        |
-| Validation            | Zod                                  | Shared runtime schemas and TypeScript inference                 |
-| Testing               | Vitest                               | Fast TypeScript-first testing                                   |
-| Visual agent feedback | Agentation + Agentation MCP          | Click-to-annotate UI feedback for coding agents                 |
-| Code hygiene          | Knip, ESLint, Prettier, Husky        | Detect dead code and enforce conventions                        |
+| Area                  | Choice                               | Rationale                                                          |
+| --------------------- | ------------------------------------ | ------------------------------------------------------------------ |
+| Monorepo              | Turborepo + pnpm                     | Workspace graph, cached tasks, remote cache (D5)                   |
+| Web runtime           | Preact                               | Lightweight React-compatible UI runtime                            |
+| Build tool            | Vite                                 | Fast development and production builds                             |
+| Frontend routing      | `preact-iso`                         | Preact-team router, hooks-based, async-route aware                 |
+| Backend framework     | Hono                                 | Lightweight, Web-standard, Worker-native routing and middleware    |
+| Backend primitives    | Frostbase (optional preset)          | Auth, document/SQL data, realtime, R2 storage, remote config       |
+| Auth                  | Frostbase / Better Auth              | Reusable authentication without building a custom auth service     |
+| Data access           | Repository adapters                  | Services remain provider-agnostic; Frostbase is one implementation |
+| Hosting               | Cloudflare Workers + static assets   | One platform for frontend and API                                  |
+| UI primitives         | shadcn/ui with Base UI (`base-mira`) | Owned, editable components and design tokens (D3)                  |
+| Styling               | Tailwind CSS v4 + CSS variables      | CSS-first config, utility-first styling, theme switching           |
+| Validation            | Zod                                  | Shared runtime schemas and TypeScript inference                    |
+| Testing               | Vitest                               | Fast TypeScript-first testing                                      |
+| Visual agent feedback | Agentation + Agentation MCP          | Click-to-annotate UI feedback for coding agents                    |
+| Code hygiene          | Knip, ESLint, Prettier, Husky        | Detect dead code and enforce conventions                           |
 
 ## 5. Repository structure
 
@@ -181,9 +244,9 @@ caly-cloud/
 ├── .prettierrc
 ├── .editorconfig
 ├── .gitignore
+├── .gitattributes            # forces LF for .husky hooks and *.sh
 ├── .env.example
 ├── .husky/
-├── .opencode/
 ├── .vscode/
 ├── .github/
 │   └── workflows/
@@ -193,10 +256,10 @@ caly-cloud/
 │   ├── architecture.md
 │   ├── theming.md
 │   ├── agent-feedback.md
+│   ├── frostbase.md
 │   └── preact-shadcn-baseui-tailwind.md   # distilled from the reference
 ├── plans/
 │   └── 001-initial-spike.md
-├── scripts/
 └── packages/
     ├── webapp/
     ├── api/
@@ -209,13 +272,13 @@ caly-cloud/
 
 ## 6. Package responsibilities
 
-| Package            | Responsibility                               | Contains                                                         |
-| ------------------ | -------------------------------------------- | ---------------------------------------------------------------- |
-| `@caly/webapp`     | Preact SPA, static assets, frontend Worker   | Routes, features, app components, Agentation integration         |
-| `@caly/api`        | Backend HTTP API                             | Hono routes, services, repositories, middleware, Worker bindings |
-| `@caly/ui`         | Reusable design-system primitives            | shadcn-generated components, shared UI hooks, `cn` utility       |
-| `@caly/shared`     | Framework-agnostic contracts and domain code | Zod schemas, types, constants, API contracts, pure utilities     |
-| `@caly/worker-kit` | Reusable Worker utilities                    | CORS factory, error envelope, binding-agnostic middleware (§15)  |
+| Package            | Responsibility                               | Contains                                                                                 |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `@caly/webapp`     | Preact SPA, static assets, frontend Worker   | Routes, features, app components, Agentation integration                                 |
+| `@caly/api`        | Backend HTTP API and backend integrations    | Hono routes, services, repositories, middleware, Frostbase infrastructure (when enabled) |
+| `@caly/ui`         | Reusable design-system primitives            | shadcn-generated components, shared UI hooks, `cn` utility                               |
+| `@caly/shared`     | Framework-agnostic contracts and domain code | Zod schemas, types, constants, API contracts, pure utilities                             |
+| `@caly/worker-kit` | Reusable Worker utilities                    | CORS factory, error envelope, binding-agnostic middleware (§16)                          |
 
 ### Dependency rules
 
@@ -227,6 +290,10 @@ caly-cloud/
 - `@caly/ui` must not import from `@caly/webapp` or `@caly/api`.
 - `@caly/shared` must not import from any application package.
 - `@caly/worker-kit` must not import from any application package.
+- `@caly/api` may import Frostbase SDK/client packages only from its
+  `src/infrastructure/frostbase` directory.
+- `@caly/webapp` must not import Frostbase server SDKs or repository code.
+- `@caly/shared` must not import Frostbase.
 
 ## 7. Preact runtime and React aliasing
 
@@ -273,9 +340,18 @@ export default defineConfig({
          { find: '@', replacement: srcDir },
          { find: /^react$/, replacement: preactEntry('preact/compat') },
          { find: /^react-dom$/, replacement: preactEntry('preact/compat') },
-         { find: /^react-dom\/client$/, replacement: preactEntry('preact/compat/client') },
-         { find: /^react\/jsx-runtime$/, replacement: preactEntry('preact/jsx-runtime') },
-         { find: /^react\/jsx-dev-runtime$/, replacement: preactEntry('preact/jsx-dev-runtime') },
+         {
+            find: /^react-dom\/client$/,
+            replacement: preactEntry('preact/compat/client'),
+         },
+         {
+            find: /^react\/jsx-runtime$/,
+            replacement: preactEntry('preact/jsx-runtime'),
+         },
+         {
+            find: /^react\/jsx-dev-runtime$/,
+            replacement: preactEntry('preact/jsx-dev-runtime'),
+         },
       ],
    },
 });
@@ -287,35 +363,32 @@ export default defineConfig({
 
 ```json
 {
+   "extends": "../../tsconfig.base.json",
    "compilerOptions": {
-      "target": "ES2020",
-      "module": "ESNext",
-      "moduleResolution": "bundler",
-      "noEmit": true,
-      "baseUrl": ".",
+      "lib": ["ES2022", "DOM", "DOM.Iterable"],
       "jsx": "react-jsx",
       "jsxImportSource": "preact",
-      "skipLibCheck": true,
-      "types": ["vite/client", "@cloudflare/workers-types"],
+      "types": ["vite/client", "node"],
+      "baseUrl": ".",
       "paths": {
          "@/*": ["./src/*"],
          "react": ["./node_modules/preact/compat/"],
          "react-dom": ["./node_modules/preact/compat/"]
       }
    },
-   "include": ["src/**/*", "vite.config.ts"],
-   "exclude": ["dist/*", "public/*"]
+   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+   "exclude": ["dist"]
 }
 ```
 
-**Critical rules**
+### Critical rules
 
 - Always import React APIs from `'react'` (aliased). Never import `useState`
   from `'preact/hooks'` — that bypasses `preact/compat` and breaks consumers.
 - `skipLibCheck: true` is mandatory (React library types vs. Preact compat
   types).
 - If `react`/`react-dom` paths are missing from `tsconfig`, the app still
-  _runs_ but every component reports "Cannot find module 'react'".
+  _runs_ but every component reports “Cannot find module ‘react’”.
 
 ### Dependency rule
 
@@ -352,8 +425,8 @@ preserves the outgoing route while an incoming async route loads.
 - Keep route components thin; delegate data access to feature hooks/services.
 - Use typed route parameters where possible.
 - Keep navigation accessible with real anchor (`<a>`) elements.
-- Do not couple route components directly to Worker bindings or database
-  repositories.
+- Do not couple route components directly to Worker bindings, Frostbase clients,
+  or database repositories.
 
 ### Route files
 
@@ -377,15 +450,15 @@ packages/webapp/src/routes/
 `packages/webapp/src/App.tsx`:
 
 ```tsx
-import { Router, Route } from 'preact-iso';
-import { Home } from '@/routes/home';
-import { Dashboard } from '@/routes/dashboard';
-import { Settings } from '@/routes/settings';
-import { ExampleList } from '@/routes/examples/list';
-import { ExampleDetail } from '@/routes/examples/detail';
-import { NotFound } from '@/routes/not-found';
-import { AppShell } from '@/components/app-shell';
-import { AgentationToolbar } from '@/lib/agentation';
+import { Route, Router } from 'preact-iso';
+import { AppShell } from './components/app-shell';
+import { AgentationToolbar } from './lib/agentation';
+import { Dashboard } from './routes/dashboard';
+import { ExampleDetail } from './routes/examples/detail';
+import { ExampleList } from './routes/examples/list';
+import { Home } from './routes/home';
+import { NotFound } from './routes/not-found';
+import { Settings } from './routes/settings';
 
 export function App() {
    return (
@@ -442,6 +515,7 @@ export function DashboardNav() {
 
 export function ExampleLink({ id }: { id: string }) {
    const { route } = useLocation();
+
    return (
       <a
          href={`/examples/${id}`}
@@ -515,10 +589,15 @@ middleware, JSON handling, and typed access to Worker bindings. Routes are
 }
 ```
 
-`packages/ui/tsconfig.json` must mirror the webapp's React aliasing
+`packages/ui/tsconfig.json` must mirror the webapp’s React aliasing
 (`jsxImportSource: "preact"`, `paths` for `react`/`react-dom`,
-`skipLibCheck: true`) so the package type-checks standalone against Base UI's
+`skipLibCheck: true`) so the package type-checks standalone against Base UI’s
 React types.
+
+`packages/ui/src/lib/` also holds `preact-compat.ts`, which strips the `ref`
+prop before it crosses the React→Preact boundary (Base UI types `ref` as a
+callback taking `never`, which Preact’s ref type rejects). The generated
+primitives forward their props through it.
 
 ### Shared UI shadcn config
 
@@ -527,7 +606,7 @@ React types.
 ```json
 {
    "$schema": "https://ui.shadcn.com/schema.json",
-   "style": "base-nova",
+   "style": "base-mira",
    "rsc": false,
    "tsx": true,
    "tailwind": {
@@ -555,7 +634,7 @@ React types.
 ```json
 {
    "$schema": "https://ui.shadcn.com/schema.json",
-   "style": "base-nova",
+   "style": "base-mira",
    "rsc": false,
    "tsx": true,
    "tailwind": {
@@ -577,7 +656,7 @@ React types.
 ```
 
 The decisive aliases are `"ui": "@caly/ui/components"` and
-`"utils": "@caly/ui/lib/utils"`; shadcn's monorepo resolution routes generated
+`"utils": "@caly/ui/lib/utils"`; shadcn’s monorepo resolution routes generated
 primitives into the workspace package that `exports` those paths. Keep `style`,
 `baseColor`, `iconLibrary`, and Tailwind settings **identical** between the two
 `components.json` files.
@@ -625,7 +704,8 @@ export function DeploymentCard() {
 Immediately after generating the first batch, verify in the running app that
 `Dialog`, `DropdownMenu`, `Select`, and `Popover` open, close, and position
 correctly under `preact/compat`. If any hang, switch those components (or the
-whole style) to Radix. Record the outcome in `docs/preact-shadcn-baseui-tailwind.md`.
+whole style) to Radix. Record the outcome in
+`docs/preact-shadcn-baseui-tailwind.md`.
 
 ## 10. Theming and presets
 
@@ -653,6 +733,10 @@ packages/webapp/src/styles/
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
+@source '../../../ui/src';
+@import '@fontsource-variable/roboto';
+@import '@fontsource-variable/noto-sans';
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -664,7 +748,7 @@ packages/webapp/src/styles/
 
 .dark {
    --background: oklch(0.16 0.02 260);
-   --foreground: oklch(0.95 0.01 260);
+   --foreground: oklch(0.95 0.02 260);
 }
 
 @theme inline {
@@ -678,6 +762,7 @@ packages/webapp/src/styles/
    * {
       @apply border-border outline-ring/50;
    }
+
    body {
       @apply bg-background text-foreground;
    }
@@ -733,6 +818,10 @@ packages/webapp/
     │   ├── api/
     │   │   ├── client.ts
     │   │   └── examples.ts
+    │   ├── frostbase/            # optional; only auth, realtime, storage
+    │   │   ├── auth.ts
+    │   │   ├── realtime.ts
+    │   │   └── storage.ts
     │   └── theme.ts
     └── styles/
         └── globals.css
@@ -792,11 +881,17 @@ The webapp Worker serves the built static assets and, with
 `packages/webapp/src/worker.ts`:
 
 ```ts
+type Env = {
+   ASSETS: {
+      fetch(request: Request): Promise<Response>;
+   };
+};
+
 export default {
-   async fetch(request, env) {
+   async fetch(request: Request, env: Env): Promise<Response> {
       return env.ASSETS.fetch(request);
    },
-} satisfies ExportedHandler<{ ASSETS: Fetcher }>;
+};
 ```
 
 ### API Worker
@@ -820,8 +915,9 @@ bindings** (D6).
 }
 ```
 
-Add D1, R2, KV, Queues, Durable Objects, or AI bindings **only when a feature
-requires them**, and extend `ApiEnv` at the same time.
+Add D1, R2, KV, Queues, Durable Objects, AI bindings, or Frostbase
+configuration **only when a feature requires them**, and extend `ApiEnv` at the
+same time.
 
 ### Production topology (D4)
 
@@ -831,11 +927,16 @@ the API Worker, and the web Worker serves everything else with SPA fallback:
 ```jsonc
 // packages/api/wrangler.jsonc (added at deploy time)
 {
-   "routes": [{ "pattern": "app.example.com/api/*", "zone_name": "example.com" }],
+   "routes": [
+      {
+         "pattern": "app.example.com/api/*",
+         "zone_name": "example.com",
+      },
+   ],
 }
 ```
 
-The webapp's production `VITE_API_BASE_URL=/api/v1` therefore resolves to the
+The webapp’s production `VITE_API_BASE_URL=/api/v1` therefore resolves to the
 API Worker through the same origin.
 
 ## 13. Shared API contracts
@@ -871,7 +972,8 @@ export const exampleSchema = z.object({
 export type Example = z.infer<typeof exampleSchema>;
 ```
 
-Both the Preact client and the Hono API import these schemas from `@caly/shared`.
+Both the Preact client and the Hono API import these schemas from
+`@caly/shared`.
 
 ## 14. API layer
 
@@ -900,29 +1002,50 @@ packages/api/
     ├── repositories/
     │   └── example-repository.ts
     └── lib/
-        ├── http.ts
         └── validation.ts
 ```
 
+Frostbase-only files (`middleware/auth.ts`, `infrastructure/frostbase/**`) are
+added only when the optional preset is enabled (§15); the base tree omits them.
+
 ### Dependencies
+
+Base API dependencies:
 
 ```bash
 pnpm --filter @caly/api add hono zod @caly/shared @caly/worker-kit
 pnpm --filter @caly/api add -D @cloudflare/workers-types wrangler vitest
 ```
 
+Frostbase dependencies are added only when the backend preset is enabled.
+
 ### Typed environment
 
-`packages/api/src/env.ts` — starts minimal; bindings are added per feature (D6):
+`packages/api/src/env.ts` — starts minimal; bindings and Frostbase values are
+added per feature (D6, D7):
 
 ```ts
+import type { RequestContextVars } from '@caly/worker-kit';
+
 export type ApiEnv = {
    API_VERSION: string;
+
    // Add when a feature needs them:
    // DB: D1Database;
    // STORAGE: R2Bucket;
    // CACHE: KVNamespace;
    // AUTH_SECRET: string;
+
+   // Add when the Frostbase preset is enabled:
+   // FROSTBASE_PROJECT_ID: string;
+   // FROSTBASE_BASE_URL: string;
+   // FROSTBASE_SERVER_KEY: string;
+};
+
+/** Hono environment for every route in this Worker. */
+export type AppBindings = {
+   Bindings: ApiEnv;
+   Variables: RequestContextVars;
 };
 ```
 
@@ -933,21 +1056,19 @@ export type ApiEnv = {
 ```ts
 import { Hono } from 'hono';
 import { logger } from 'hono/logger';
-import type { ApiEnv } from './env';
-import { requestContext } from './middleware/request-context';
+import type { AppBindings } from './env';
 import { corsMiddleware } from './middleware/cors';
 import { errorHandler } from './middleware/error-handler';
-import { healthRoutes } from './routes/health';
-import { exampleRoutes } from './routes/examples';
+import { requestContext } from './middleware/request-context';
+import { registerRoutes } from './routes';
 
-const app = new Hono<{ Bindings: ApiEnv }>();
+export const app = new Hono<AppBindings>();
 
 app.use('*', logger());
 app.use('*', requestContext());
-app.use('/api/v1/*', corsMiddleware());
+app.use('/api/v1/*', corsMiddleware);
 
-app.route('/api/v1/health', healthRoutes);
-app.route('/api/v1/examples', exampleRoutes);
+registerRoutes(app);
 
 app.onError(errorHandler);
 
@@ -961,15 +1082,16 @@ export default app;
 ```ts
 import { Hono } from 'hono';
 import { createExampleInputSchema } from '@caly/shared';
-import type { ApiEnv } from '../env';
+import type { AppBindings } from '../env';
+import { parse } from '../lib/validation';
 import { createExample } from '../services/example-service';
 
-export const exampleRoutes = new Hono<{ Bindings: ApiEnv }>()
-   .get('/', (context) => context.json({ data: [] }))
-   .post('/', async (context) => {
-      const input = createExampleInputSchema.parse(await context.req.json());
-      const example = await createExample(context.env, input);
-      return context.json({ data: example }, 201);
+export const exampleRoutes = new Hono<AppBindings>()
+   .get('/', (c) => c.json({ data: [] }))
+   .post('/', async (c) => {
+      const input = parse(createExampleInputSchema, await c.req.json());
+      const example = await createExample(c.env, input);
+      return c.json({ data: example }, 201);
    });
 ```
 
@@ -984,7 +1106,13 @@ Success:
 Error:
 
 ```json
-{ "error": { "code": "VALIDATION_ERROR", "message": "Invalid request body", "details": [] } }
+{
+   "error": {
+      "code": "VALIDATION_ERROR",
+      "message": "Invalid request body",
+      "details": []
+   }
+}
 ```
 
 | Status | Use                                   |
@@ -1011,13 +1139,189 @@ Error:
 - Use typed Worker bindings.
 - Do not import `@caly/webapp` from `@caly/api`.
 - Keep secrets in Wrangler secrets or `.dev.vars`; never commit them.
+- Keep Frostbase SDK usage confined to `src/infrastructure/frostbase`.
 
-## 15. `@caly/worker-kit`
+## 15. Frostbase backend preset
+
+Frostbase is an optional backend preset built on Cloudflare Workers, Durable
+Objects, and R2. It provides:
+
+- Better Auth-based authentication
+- Schemaless document collections
+- Typed single-table SQLite tables via Drizzle
+- Realtime document subscriptions
+- R2-backed object storage
+- Remote configuration and feature flags
+
+Frostbase is **not enabled by default**. The base starter remains Hono-only and
+binding-free (D6).
+
+### Enablement
+
+Create a Frostbase project and add only the agents required by the application:
+
+```bash
+pnpm dlx @frostbase-dev/cli init frostbase-backend
+cd frostbase-backend
+
+frostbase add auth
+frostbase add db
+
+# Add only when needed:
+frostbase add storage
+```
+
+Deploy the selected agents:
+
+```bash
+frostbase deploy
+```
+
+A project may use either a hosted Frostbase deployment or a self-hosted
+deployment in its own Cloudflare account. The starter must not assume one mode;
+all project-specific values come from environment configuration.
+
+### Architecture
+
+```text
+Preact SPA
+   │
+   ├── /api/v1/* ──► Hono API Worker
+   │                    ├── Frostbase auth verification
+   │                    ├── Frostbase db / storage clients
+   │                    ├── domain services + authorization
+   │                    └── shared Zod contracts
+   │
+   └── optional direct Frostbase calls
+        ├── auth endpoints
+        ├── realtime subscriptions
+        └── storage upload URLs
+```
+
+### Environment
+
+Extend `ApiEnv` only when Frostbase is enabled:
+
+```ts
+export type ApiEnv = {
+   API_VERSION: string;
+
+   FROSTBASE_PROJECT_ID: string;
+   FROSTBASE_BASE_URL: string;
+   FROSTBASE_SERVER_KEY: string;
+};
+```
+
+Secrets belong in `.dev.vars` locally and Wrangler secrets in production:
+
+```bash
+npx wrangler secret put FROSTBASE_SERVER_KEY
+```
+
+### Repository boundary
+
+Services must depend on interfaces, not Frostbase directly:
+
+```ts
+export interface ExampleRepository {
+   create(userId: string, input: CreateExampleInput): Promise<Example>;
+   listForUser(userId: string): Promise<Example[]>;
+}
+```
+
+The Frostbase implementation:
+
+```ts
+import type { ExampleRepository } from '../../repositories/example-repository';
+import type { CreateExampleInput, Example } from '@caly/shared';
+
+export function createFrostbaseExampleRepository(db: FrostbaseDbClient): ExampleRepository {
+   const examples = db.collection('examples');
+
+   return {
+      async create(userId, input) {
+         const document = await examples.create({
+            ...input,
+            userId,
+         });
+
+         return mapExample(document);
+      },
+
+      async listForUser(userId) {
+         const documents = await examples.query({
+            where: { userId },
+         });
+
+         return documents.map(mapExample);
+      },
+   };
+}
+```
+
+Routes remain thin and provider-agnostic:
+
+```ts
+exampleRoutes.post('/', async (context) => {
+   const input = createExampleInputSchema.parse(await context.req.json());
+   const user = await requireUser(context);
+
+   const example = await exampleService.create(context.env.exampleRepository, user.id, input);
+
+   return context.json({ data: example }, 201);
+});
+```
+
+### Data modeling rules
+
+- Use **collections** for flexible document data, drafts, notes, and rapidly
+  evolving prototypes.
+- Use **SQL tables** for stable, strongly typed entities.
+- Do not design around cross-table joins: Frostbase SQL tables are
+  single-table; use read-only views for limited reporting joins.
+- Map Frostbase documents/rows to Zod schemas from `@caly/shared` before
+  returning them from API routes.
+- Store `userId` and ownership fields explicitly; do not rely on
+  client-supplied ownership data.
+
+### Authorization rules
+
+Frostbase authentication establishes identity. Hono services establish
+authorization.
+
+Every protected route must:
+
+1. Resolve the authenticated user.
+2. Validate the request with `@caly/shared` Zod schemas.
+3. Apply ownership/role checks in the service layer.
+4. Pass a scoped query or explicit `userId` to the repository.
+
+Never infer authorization from the fact that a request reached the API.
+
+### Direct browser access
+
+Allowed only for:
+
+```text
+auth flows
+realtime subscriptions
+storage upload URLs
+```
+
+All other Frostbase access occurs from `@caly/api`.
+
+### Removal path
+
+Because Frostbase is isolated behind repository interfaces, an application can
+replace it with D1, R2, another BaaS, or a custom Worker-backed implementation
+without changing route handlers or service logic.
+
+## 16. `@caly/worker-kit`
 
 Kept because it has concrete consumers (D6). It holds **binding-agnostic**
 Worker helpers:
 
-- `cors(origin)` — a CORS middleware factory used by `@caly/api`.
+- `createCors(origin)` — a CORS middleware factory used by `@caly/api`.
 - `errorEnvelope(code, message, details?)` and `ok(data, meta?)` — the standard
   JSON envelope helpers shared by all API routes.
 - `requestContext()` — correlation-id / request-scoped context middleware.
@@ -1027,7 +1331,7 @@ It must not import from any application package and must not assume specific
 bindings. If, by the end of the spike, it has fewer than two real consumers,
 fold it into `@caly/api` and delete the package.
 
-## 16. Frontend API client
+## 17. Frontend API client
 
 `packages/webapp/src/lib/api/client.ts` parses the shared response envelope and
 throws a typed error on failure:
@@ -1049,13 +1353,17 @@ export class ApiError extends Error {
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
    const response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...init?.headers },
+      headers: {
+         'Content-Type': 'application/json',
+         ...init?.headers,
+      },
    });
 
    const payload = await response.json().catch(() => null);
 
    if (!response.ok) {
       const error = payload?.error;
+
       throw new ApiError(
          response.status,
          error?.code ?? 'UNKNOWN',
@@ -1079,7 +1387,29 @@ export function listExamples() {
 }
 ```
 
-## 17. Agentation integration
+### Frostbase-aware frontend modules
+
+The frontend API client remains the default data-access path. It calls Hono, not
+Frostbase, for normal CRUD operations.
+
+Create separate, explicitly named modules only for permitted direct Frostbase
+use:
+
+```text
+packages/webapp/src/lib/frostbase/
+├── auth.ts
+├── realtime.ts
+└── storage.ts
+```
+
+Rules:
+
+- Do not import Frostbase clients inside route components.
+- Wrap direct Frostbase calls in feature-level hooks or service modules.
+- Never place Frostbase server keys in the webapp.
+- Use environment variables only for public/project-level client configuration.
+
+## 18. Agentation integration
 
 Agentation provides visual UI feedback for AI coding agents: developers click
 elements in the running preview, add notes, and the connected agent receives
@@ -1121,13 +1451,14 @@ import { Agentation } from 'agentation';
 
 export function AgentationToolbar() {
    if (!import.meta.env.DEV) return null;
+
    return <Agentation endpoint='http://localhost:4747' />;
 }
 ```
 
 Agentation must never render in production builds.
 
-## 18. Turborepo and remote caching
+## 19. Turborepo and remote caching
 
 ### Root scripts
 
@@ -1140,10 +1471,13 @@ Agentation must never render in production builds.
       "check-types": "turbo run check-types",
       "test": "turbo run test",
       "knip": "knip",
+      "format": "prettier --write .",
+      "format:check": "prettier --check .",
       "deploy:web": "pnpm --filter @caly/webapp deploy",
       "deploy:api": "pnpm --filter @caly/api deploy",
       "deploy": "pnpm deploy:api && pnpm deploy:web",
-      "theme:apply": "pnpm --filter @caly/webapp theme:apply"
+      "theme:apply": "pnpm --filter @caly/webapp theme:apply",
+      "prepare": "husky"
    }
 }
 ```
@@ -1157,12 +1491,19 @@ Agentation must never render in production builds.
       "build": {
          "dependsOn": ["^build"],
          "inputs": ["$TURBO_DEFAULT$", ".env*"],
-         "outputs": ["dist/**"]
+         "outputs": ["dist/**", ".wrangler/**"]
       },
-      "dev": { "cache": false, "persistent": true },
+      "dev": {
+         "cache": false,
+         "persistent": true
+      },
       "lint": {},
-      "check-types": { "dependsOn": ["^check-types"] },
-      "test": { "dependsOn": ["^build"] }
+      "check-types": {
+         "dependsOn": ["^check-types"]
+      },
+      "test": {
+         "dependsOn": ["^build"]
+      }
    }
 }
 ```
@@ -1185,7 +1526,7 @@ npx turbo link
 - The project owner provides the remote-cache URL and API key per project when
   needed; they are never committed.
 
-## 19. Local development
+## 20. Local development
 
 | Service       | URL                     |
 | ------------- | ----------------------- |
@@ -1197,6 +1538,14 @@ npx turbo link
 
 ```env
 VITE_API_BASE_URL=http://localhost:8787/api/v1
+```
+
+`.dev.vars.example` (API, only when Frostbase is enabled):
+
+```env
+FROSTBASE_PROJECT_ID=your-frostbase-project-id
+FROSTBASE_BASE_URL=https://frostbase.dev
+FROSTBASE_SERVER_KEY=replace-with-server-key
 ```
 
 ### Quality gates
@@ -1214,7 +1563,7 @@ pnpm knip
 Required tooling: ESLint, Prettier, TypeScript, Vitest, Knip, Husky,
 lint-staged, GitHub Actions.
 
-## 20. CI pipeline
+## 21. CI pipeline
 
 ```yaml
 name: CI
@@ -1250,7 +1599,7 @@ Deployment is a separate workflow (`.github/workflows/deploy.yml`), triggered
 manually or after a successful merge to `main`; it deploys the API Worker first,
 then the frontend Worker.
 
-## 21. Agent conventions
+## 22. Agent conventions
 
 ### AGENTS.md
 
@@ -1264,6 +1613,7 @@ then the frontend Worker.
 - `packages/ui` contains reusable shadcn (Base UI) primitives.
 - `packages/shared` contains API contracts, schemas, types, and domain utilities.
 - `packages/worker-kit` contains binding-agnostic Worker utilities.
+- Frostbase is an optional backend preset, not the default API framework.
 
 ## Routing
 
@@ -1279,6 +1629,8 @@ then the frontend Worker.
   layers are mandatory; keep them in sync.
 - Never `import` from `preact/hooks` directly; import from `'react'`.
 - Do not add `react` or `react-dom` as runtime dependencies.
+- Keep `process.env.IS_PREACT` defined and the Preact preset's built-in React
+  aliases disabled (see `packages/webapp/vite.config.ts`).
 
 ## shadcn rules
 
@@ -1293,9 +1645,27 @@ then the frontend Worker.
 ## API rules
 
 - Validate all external input with Zod schemas from `packages/shared`.
-- Keep routes thin; use services and repositories.
+- Keep route handlers thin; use services for business logic and repositories
+  for data access.
 - Use the shared response envelope from `@caly/worker-kit`.
+- Start with no bindings; add D1/R2/KV (and extend `ApiEnv`) only when a feature
+  requires them.
 - Do not import `packages/webapp` from `packages/api`.
+
+## Frostbase rules
+
+- Frostbase is optional; do not add it unless the project enables the backend
+  preset.
+- Hono remains the API boundary for normal CRUD and sensitive operations.
+- Put Frostbase clients only in
+  `packages/api/src/infrastructure/frostbase/`.
+- Services depend on repository interfaces, not Frostbase SDK types.
+- Validate all external input with Zod schemas from `packages/shared`.
+- Apply authorization in Hono services; Frostbase auth only establishes
+  identity.
+- The webapp may use Frostbase directly only for auth, realtime, and storage
+  uploads.
+- Do not expose server keys or raw Frostbase documents to the frontend.
 
 ## Remote cache
 
@@ -1324,6 +1694,8 @@ internal tools, reusable UI, and agent-assisted product experiments.
 - React-to-Preact compatibility for shadcn (Base UI) and React libraries.
 - Shared UI package for generated shadcn primitives.
 - Separate Hono API Worker, typed environment, no bindings yet.
+- Optional Frostbase backend preset for auth, data, storage, realtime, and
+  remote configuration.
 - Theme/preset switching via the shadcn CLI.
 - Agentation visual feedback for coding agents.
 - Turborepo with opt-in remote caching and CI quality gates.
@@ -1335,9 +1707,19 @@ internal tools, reusable UI, and agent-assisted product experiments.
 - Preserve Preact as the only UI runtime.
 - Keep generated UI primitives separate from application code.
 - Keep API contracts in `packages/shared`.
+- Keep Frostbase optional and isolated behind repository adapters.
+
+## Notes on this scaffold
+
+- The shadcn style is `base-mira` (Base UI). `base-nova` is the same Base UI
+  family; `base-mira` is used because the initial primitives were ported
+  verbatim from the proven reference configuration.
+- `packages/worker-kit` exists because `@caly/api` consumes its CORS factory,
+  response-envelope helpers, and request-context middleware. Fold it back into
+  `@caly/api` if it ever has fewer than two real consumers.
 ```
 
-## 22. Implementation plan (tracer bullets)
+## 23. Implementation plan (tracer bullets)
 
 1. Initialize the pnpm workspace and Turborepo.
 2. Add root TypeScript, ESLint (flat), Prettier, Knip, Husky, and Vitest config.
@@ -1352,12 +1734,18 @@ internal tools, reusable UI, and agent-assisted product experiments.
 8. Create `@caly/api` with Hono, health routes, a minimal `ApiEnv`, error
    handling, and the shared envelope from `worker-kit`.
 9. Add shared Zod contracts in `@caly/shared` and the typed frontend API client.
-10.   Add Agentation in development and register its MCP server.
-11.   Configure the production `/api/*` same-zone route (D4).
-12.   Wire Turborepo remote cache as opt-in (D5) and add CI.
-13.   Deploy the API Worker, then the frontend Worker.
+10.   Add the optional Frostbase backend preset:
+      - repository interfaces in `@caly/api/src/repositories`
+      - Frostbase infrastructure in
+        `@caly/api/src/infrastructure/frostbase`
+      - auth middleware and a protected example route
+      - `.dev.vars.example` entries for Frostbase configuration
+11.   Add Agentation in development and register its MCP server.
+12.   Configure the production `/api/*` same-zone route (D4).
+13.   Wire Turborepo remote cache as opt-in (D5) and add CI.
+14.   Deploy the API Worker, then the frontend Worker.
 
-## 23. Definition of done
+## 24. Definition of done
 
 The starter is complete when:
 
@@ -1377,8 +1765,16 @@ The starter is complete when:
   they are absent.
 - CI passes lint, typecheck, tests, build, and Knip.
 - `AGENTS.md` and `CONTEXT.md` accurately describe the repository.
+- The base starter runs with Hono only and no Frostbase dependency.
+- When the Frostbase preset is enabled:
+   - Frostbase clients are confined to
+     `packages/api/src/infrastructure/frostbase`.
+   - Services consume repository interfaces rather than Frostbase SDK types.
+   - Protected API routes resolve and authorize the authenticated user.
+   - Direct webapp Frostbase usage is limited to auth, realtime, and uploads.
+   - Frostbase responses are mapped to shared Zod schemas before leaving the API.
 
-## 24. Known risks
+## 25. Known risks
 
 | Risk                                                               | Mitigation                                                                         |
 | ------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
@@ -1388,3 +1784,7 @@ The starter is complete when:
 | Web↔API 404 in production                                          | D4 same-zone `/api/*` route, tested before launch                                  |
 | Remote cache credentials unavailable                               | D5 opt-in; tasks must not fail when unset                                          |
 | `packages/worker-kit` becomes dead weight                          | Fold into `@caly/api` and delete if <2 real consumers                              |
+| Frostbase becomes tightly coupled to application code              | D7/D8 repository boundary; Frostbase only in infrastructure code                   |
+| Client-side authorization is assumed because auth exists           | D9: all writes and sensitive reads pass through Hono authorization                 |
+| Frostbase SQL model does not fit relational requirements           | Use collections, denormalized fields, application-level joins, or read-only views  |
+| Frostbase project maturity/API changes                             | Isolate SDK usage behind adapters; keep the base template Frostbase-free           |

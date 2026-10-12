@@ -47,9 +47,23 @@ required (React library types vs. Preact compat types).
   hung under `preact/compat`. Always smoke-test Dialog / DropdownMenu / Select /
   Popover after adding components; fall back to Radix if needed (SPEC D3).
 
+### Gate status
+
+Smoke-tested `Dialog` (open/close, focus) under `preact/compat`: **passing**. A
+dev-only Base UI warning about `nativeButton` may appear even though the rendered
+element is a real `<button>`; it does not affect rendering. DropdownMenu / Select
+/ Popover are not yet in the starter and remain untested.
+
 ## Tailwind v4
 
 - `@import 'tailwindcss'` (not legacy `@tailwind` directives).
 - `@custom-variant dark (&:is(.dark *))` enables `dark:*`.
 - `@theme inline` bridges CSS variables to utilities.
 - Animations come from `tw-animate-css`; shadcn extras from `shadcn/tailwind.css`.
+- Tailwind v4's automatic content detection does **not** traverse into the
+  `@caly/ui` workspace package (it lives outside the webapp root and is ignored
+  like `node_modules`). Without an explicit `@source '../../../ui/src';` in
+  `packages/webapp/src/styles/globals.css`, every utility class used only inside
+  `packages/ui` is missing from the generated CSS — the dialog renders unstyled
+  at the bottom of the page. Keep the `@source` directive whenever the UI package
+  is consumed.

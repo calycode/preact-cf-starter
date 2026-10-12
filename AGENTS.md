@@ -7,6 +7,7 @@
 - `packages/ui` contains reusable shadcn (Base UI) primitives.
 - `packages/shared` contains API contracts, schemas, types, and domain utilities.
 - `packages/worker-kit` contains binding-agnostic Worker utilities.
+- Frostbase is an optional backend preset, not the default API framework.
 
 ## Routing
 
@@ -47,6 +48,21 @@
 - Start with no bindings; add D1/R2/KV (and extend `ApiEnv`) only when a feature
   requires them.
 - Do not import `packages/webapp` from `packages/api`.
+
+## Frostbase rules
+
+- Frostbase is optional; do not add it unless the project enables the backend
+  preset.
+- Hono remains the API boundary for normal CRUD and sensitive operations.
+- Put Frostbase clients only in
+  `packages/api/src/infrastructure/frostbase/`.
+- Services depend on repository interfaces, not Frostbase SDK types.
+- Validate all external input with Zod schemas from `packages/shared`.
+- Apply authorization in Hono services; Frostbase auth only establishes
+  identity.
+- The webapp may use Frostbase directly only for auth, realtime, and storage
+  uploads.
+- Do not expose server keys or raw Frostbase documents to the frontend.
 
 ## Remote cache
 

@@ -10,6 +10,8 @@ internal tools, reusable UI, and agent-assisted product experiments.
 - React-to-Preact compatibility for shadcn (Base UI) and React libraries.
 - Shared UI package for generated shadcn primitives.
 - Separate Hono API Worker, typed environment, no bindings yet.
+- Optional Frostbase backend preset for auth, data, storage, realtime, and
+  remote configuration.
 - Theme/preset switching via the shadcn CLI.
 - Agentation visual feedback for coding agents.
 - Turborepo with opt-in remote caching and CI quality gates.
@@ -21,6 +23,7 @@ internal tools, reusable UI, and agent-assisted product experiments.
 - Preserve Preact as the only UI runtime.
 - Keep generated UI primitives separate from application code.
 - Keep API contracts in `packages/shared`.
+- Keep Frostbase optional and isolated behind repository adapters.
 
 ## Notes on this scaffold
 
